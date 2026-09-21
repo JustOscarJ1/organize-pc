@@ -1,5 +1,7 @@
 # organize-pc
 
+![organize-pc](media/organize-pc.png)
+
 Come back to a Windows machine covered in Claude Code terminals, Notepad tabs and half-dead dev servers, say "organize my PC", and get back a lean desktop and one page that says what every agent was doing and what it is waiting on.
 
 `pc` is a single Python file. It finds every live Claude Code session, reads its transcript to see the opening ask and the closing report, decides which sessions are done, banks and closes Notepad tabs whose text already went to an agent, closes the apps that are not load-bearing, kills leaked servers, and lays out virtual desktops: Claude on the left monitor, the thing to look at in the centre, the state file on the right.
