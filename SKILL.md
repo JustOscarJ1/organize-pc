@@ -11,9 +11,9 @@ The tool is `pc` (on PATH via `%USERPROFILE%\.local\bin\pc.cmd`, source `%USERPR
 
 ## The run
 
-1. `pc scan` and read it. Lanes carry a verdict: `self`, `busy` (title spinner or a subagent transcript touched in the last 10 min), `idle` (spoken in under 6 h), `done`, `empty` (no transcript). Notepad tabs carry `close-saved` (file on disk), `close-empty`, `bank-close` (text already appears in a user message of some session), `keep` (unsent thought or personal).
+1. `pc scan` and read it. Lanes carry a verdict: `self`, `busy` (title spinner or a subagent transcript touched in the last 10 min), `idle` (process or last message under 6 h old), `fresh` (young, no transcript yet), `done`. Notepad tabs carry `close-saved` (file on disk), `close-empty`, `bank-close` (text already appears in a user message of some session), `keep` (unsent thought or personal).
 2. Disagree with a verdict by looking, not by editing the tool: open the lane's transcript tail, read the tab. If the rule is wrong, change `policy.json` (hours, patterns, app lists) and rerun.
-3. `pc organize --apply`. Order inside: bank every unsaved tab to `~/pc/bank/` and read it back; write `lanes/<title>.txt` for every lane that will close; kill done and empty sessions with their cmd host (their Windows Terminal windows go with them); close spent Notepad tabs (Ctrl+W, answer Don't save); WM_CLOSE then kill the close-list apps; kill leaked servers and orphans; build desktops; write `STATE.txt`.
+3. `pc organize --apply`. Order inside: bank every unsaved tab to `~/pc/bank/` and read it back; write `lanes/<title>.txt` for every lane that will close; kill done sessions with their cmd host (their Windows Terminal windows go with them); close spent Notepad tabs (Ctrl+W, answer Don't save); WM_CLOSE then kill the close-list apps; kill leaked servers and orphans; build desktops; write `STATE.txt`.
 4. Look at the result. `pc scan` again, and switch through the desktops. Report what closed, what stayed, what each live lane waits on, and the rulings that closed lanes left behind (they are in STATE.txt under CLOSED, RESUMABLE).
 
 ## Desktops
