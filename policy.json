@@ -1,0 +1,20 @@
+{
+  "home": "~/pc",
+  "done_after_hours": 6,
+  "subagent_active_minutes": 10,
+  "close_apps": [
+    "chrome.exe", "msedge.exe", "opera.exe", "firefox.exe", "Spotify.exe", "steam.exe", "steamwebhelper.exe",
+    "Discord.exe", "RiotClientServices.exe", "RiotClientUx.exe", "EpicGamesLauncher.exe",
+    "SystemSettings.exe", "WinStore.App.exe", "pycharm64.exe", "Code.exe", "obsidian.exe"
+  ],
+  "keep_apps": [
+    "explorer.exe", "WindowsTerminal.exe", "OpenConsole.exe", "Notepad.exe", "claude.exe", "OneDrive.exe"
+  ],
+  "leak_patterns": [
+    "@embedded-postgres", "esbuild.exe", "db dev --port", "build.py --serve", "serve --port",
+    "chrome-headless-shell", "playwright.driver", "@playwright.mcp", "npx-cli.js",
+    "vitest", "tsx watch", "next dev", "vite"
+  ],
+  "keep_patterns": ["OneDrive"],
+  "monitors": {"left": "\\\\.\\DISPLAY3", "centre": "\\\\.\\DISPLAY2", "right": "\\\\.\\DISPLAY1"}
+}
