@@ -20,6 +20,7 @@ BANK = os.path.join(HOME, "bank")
 LANES = os.path.join(HOME, "lanes")
 STATE_TXT = os.path.join(HOME, "STATE.txt")
 PROJECTS = os.path.expanduser(r"~\.claude\projects")
+SESSIONS = os.path.expanduser(r"~\.claude\sessions")   # <pid>.json per live claude: sessionId, cwd, status
 NOTEPAD_TABSTATE = os.path.expandvars(r"%LOCALAPPDATA%\Packages\Microsoft.WindowsNotepad_8wekyb3d8bbwe\LocalState\TabState")
 BUSY_GLYPHS = "◐◑◒◓"
 NOW = time.time()
@@ -310,25 +311,31 @@ def scan(read_notepad=True):
     t = proc_table()
     me = my_claude_pid(t)
     trs = transcripts()
+    claude_starts = [p.info["create_time"] for p in t.values() if p.info["name"] == "claude.exe"]
+    oldest_start = min(claude_starts) if claude_starts else NOW
+    # every user/assistant timestamp of each transcript written since the oldest live claude started.
+    # a fresh session's first entry, and a resumed session's first entry after resume, both land
+    # within seconds of the process start; that is how a process finds its transcript.
     tinfo = {}
     for f in trs:
-        if os.sep + "subagents" + os.sep in f:
+        if os.sep + "subagents" + os.sep in f or os.path.getmtime(f) < oldest_start - 60:
             continue
+        stamps = []
         try:
-            tinfo[f] = dict(first_ts=0)
-            # first timestamp only, cheap
             with open(f, encoding="utf-8", errors="ignore") as fh:
                 for line in fh:
-                    if '"timestamp"' in line:
-                        try:
-                            o = json.loads(line)
-                            tinfo[f]["first_ts"] = dt.datetime.fromisoformat(o["timestamp"].replace("Z", "+00:00")).timestamp()
-                            tinfo[f]["cwd"] = o.get("cwd", "")
-                        except Exception:
-                            pass
-                        break
+                    if '"timestamp"' not in line or ('"type":"user"' not in line[:200] and '"type": "user"' not in line[:200]
+                                                     and '"type":"assistant"' not in line[:200] and '"type": "assistant"' not in line[:200]):
+                        continue
+                    try:
+                        o = json.loads(line)
+                        stamps.append(dt.datetime.fromisoformat(o["timestamp"].replace("Z", "+00:00")).timestamp())
+                    except Exception:
+                        pass
         except Exception:
             pass
+        if stamps:
+            tinfo[f] = dict(first_ts=stamps[0], stamps=stamps)
 
     lanes = []
     for pid, p in t.items():
@@ -336,9 +343,26 @@ def scan(read_notepad=True):
             continue
         title, chwnd = console_title(pid)
         start = p.info["create_time"]
-        cands = sorted(((abs(v["first_ts"] - start), f) for f, v in tinfo.items() if abs(v["first_ts"] - start) < 180), key=lambda x: x[0])
+        cands = []
+        reg = {}
+        try:
+            reg = json.load(open(os.path.join(SESSIONS, f"{pid}.json"), encoding="utf-8"))
+        except Exception:
+            pass
+        if reg.get("sessionId"):
+            hit = glob.glob(os.path.join(PROJECTS, "*", reg["sessionId"] + ".jsonl"))
+            if hit:
+                cands = [(0, hit[0])]
+        if not cands:
+            for f, v in tinfo.items():
+                near = [x - start for x in v["stamps"] if -15 <= x - start <= 600]
+                if near:
+                    cands.append((min(abs(d) for d in near), f))
+            cands.sort(key=lambda x: x[0])
         lane = dict(pid=pid, cmd_pid=p.info["ppid"], title=title.lstrip(BUSY_GLYPHS + "✳ ").strip(), raw_title=title,
-                    busy=bool(title and title[0] in BUSY_GLYPHS), start=stamp(start), rss_mb=round(p.info["memory_info"].rss / 2 ** 20),
+                    busy=bool(title and title[0] in BUSY_GLYPHS) or reg.get("status") == "busy", start=stamp(start), age_hours=round((NOW - start) / 3600, 1),
+                    registry=reg.get("status", ""),
+                    rss_mb=round(p.info["memory_info"].rss / 2 ** 20),
                     sid="", transcript="", idle_hours=None, subagents=False, first_ask="", report="", rulings=[], turns=0)
         if cands:
             f = cands[0][1]
@@ -347,16 +371,17 @@ def scan(read_notepad=True):
             lane.update(sid=sid, transcript=f, idle_hours=round((NOW - info["last_ts"]) / 3600, 1),
                         subagents=subagents_active(sid, POLICY["subagent_active_minutes"]),
                         first_ask=info["first_ask"], last_ask=info["last_ask"], report=info["report"], rulings=info["rulings"], turns=info["turns"])
+        young = lane["age_hours"] < POLICY["done_after_hours"]   # a process this young is someone's deliberate act
         if pid == me:
             lane["verdict"] = "self"
-        elif not lane["sid"]:
-            lane["verdict"] = "empty"
         elif lane["busy"] or lane["subagents"]:
             lane["verdict"] = "busy"
-        elif lane["idle_hours"] >= POLICY["done_after_hours"]:
-            lane["verdict"] = "done"
-        else:
+        elif not lane["sid"]:
+            lane["verdict"] = "fresh" if young else "empty"
+        elif young or lane["idle_hours"] < POLICY["done_after_hours"]:
             lane["verdict"] = "idle"
+        else:
+            lane["verdict"] = "done"
         lanes.append(lane)
     lanes.sort(key=lambda l: l["start"])
 
@@ -400,7 +425,7 @@ def scan(read_notepad=True):
         w["verdict"] = "close" if w["proc"].lower() in close_apps else "keep"
 
     # servers and leaks
-    live_claude = {l["pid"] for l in lanes if l["verdict"] in ("self", "busy", "idle")}
+    live_claude = {l["pid"] for l in lanes if l["verdict"] in ("self", "busy", "idle", "fresh")}
     servers, seen = [], set()
     for c in psutil.net_connections("inet"):
         if c.status != "LISTEN" or c.laddr.port in seen or c.pid not in t:
@@ -472,7 +497,7 @@ def write_state(s, closed_lanes=(), notes=None):
     ensure_dirs()
     closed_lanes = closed_lanes_on_disk()
     L = [f"STATE  {s['at']}   ram {s['ram']['used_gb']}/{s['ram']['total_gb']} GB", ""]
-    live = [l for l in s["lanes"] if l["verdict"] in ("busy", "idle", "self")]
+    live = [l for l in s["lanes"] if l["verdict"] in ("busy", "idle", "self", "fresh")]
     L.append("LIVE LANES")
     for l in live:
         tag = "working" if l["busy"] or l["subagents"] else f"idle {l['idle_hours']}h"
@@ -578,7 +603,7 @@ def close_sessions(s, apply):
     keep = [l for l in s["lanes"] if l["verdict"] not in ("done", "empty")]
     print(f"sessions: close {len(gone)}, keep {len(keep)}")
     for l in s["lanes"]:
-        print(f"  {l['verdict']:<6} {l['pid']:6} {l['title'][:50]:<52} idle {l['idle_hours']}h  {l['sid'][:8]}")
+        print(f"  {l['verdict']:<6} {l['pid']:6} {l['title'][:50]:<52} age {l['age_hours']}h  idle {l['idle_hours']}h  {l['sid'][:8]}")
     if not apply:
         return gone
     for l in gone:
@@ -655,11 +680,12 @@ def close_views():
 
 def move_to(hwnd, d):
     """Move a window to a desktop; a window that vanished mid-run is not an error."""
-    import pyvda
+    import pyvda, win32gui
     try:
-        move_to(hwnd, d)
+        pyvda.AppView(hwnd=hwnd).move(d)
         return True
-    except Exception:
+    except Exception as e:
+        print(f"  could not move {win32gui.GetWindowText(hwnd)[:50]!r} to {d.name}: {e}")
         return False
 
 
@@ -680,7 +706,7 @@ def desktops(s, apply, notes=None):
         l, t, r, b = prim
         w = (r - l) // 3
         M = dict(left=(l, t, l + w, b), centre=(l + w, t, l + 2 * w, b), right=(l + 2 * w, t, r, b))
-    live = [l for l in s["lanes"] if l["verdict"] in ("self", "busy", "idle")]
+    live = [l for l in s["lanes"] if l["verdict"] in ("self", "busy", "idle", "fresh")]
     me = [l for l in live if l["verdict"] == "self"]
     others = [l for l in live if l["verdict"] != "self"]
     plan = [("Now", me)] + [(l["title"][:40], [l]) for l in others] + [("Notes", [])]
@@ -813,7 +839,7 @@ def main(argv):
             return 0
         print(f"\n{s['at']}  ram {s['ram']['used_gb']}/{s['ram']['total_gb']} GB\n\nLANES")
         for l in s["lanes"]:
-            print(f"  {l['verdict']:<6} {l['pid']:6} {l['rss_mb']:4} MB  {l['title'][:48]:<50} idle {l['idle_hours']}h  sub {'y' if l['subagents'] else 'n'}  {l['sid'][:8]}")
+            print(f"  {l['verdict']:<6} {l['pid']:6} {l['rss_mb']:4} MB  {l['title'][:48]:<50} age {l['age_hours']}h  idle {l['idle_hours']}h  sub {'y' if l['subagents'] else 'n'}  {l['sid'][:8]}")
         print("\nNOTEPAD")
         for t in s["notepad"]:
             print(f"  {t['verdict']:<12} {t['chars']:6}  {t['title'][:60]}")

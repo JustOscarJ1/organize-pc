@@ -37,7 +37,7 @@ State lands in `~/pc`: `STATE.txt`, one file per lane in `lanes/`, every unsaved
 
 ## Verdicts
 
-A session is `busy` while its terminal title spins or a subagent transcript was touched in the last ten minutes, `idle` if someone spoke in it in the last six hours, `done` otherwise, `empty` if it never got a transcript. Done and empty are closed.
+Each `claude.exe` is tied to its transcript through `~/.claude/sessions/<pid>.json`, so a resumed session is recognised as the old one. A session is `busy` while its terminal title spins, the registry says busy, or a subagent transcript was touched in the last ten minutes; `idle` if the process or its last message is younger than six hours; `fresh` if it is young and has no transcript yet; `done` otherwise. Only `done` is closed. A process younger than the threshold is never closed.
 
 A Notepad tab is closed when its file is saved on disk, when it is empty, or when its first line appears in a user message of some session. Everything else stays open on the Notes desktop.
 
